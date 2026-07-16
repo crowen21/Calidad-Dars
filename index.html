@@ -206,6 +206,15 @@
 </style>
 </head>
 <body>
+<div id="gateOverlay" style="position:fixed;inset:0;z-index:9999;background:var(--paper);display:flex;align-items:center;justify-content:center;padding:20px;">
+  <div class="modal" style="max-width:360px;text-align:center;">
+    <div style="font-size:15px;font-weight:700;margin-bottom:14px;">Aseguramiento de la Calidad — DARS</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:16px;">Ingresá la clave del equipo para entrar</div>
+    <input id="gatePassword" type="password" placeholder="Clave" style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--line);font-size:14px;box-sizing:border-box;">
+    <div id="gateError" style="display:none;color:var(--bad);font-size:12.5px;margin-top:8px;">Clave incorrecta.</div>
+    <button id="gateSubmit" class="btn btn-primary" style="width:100%;justify-content:center;margin-top:14px;">Entrar</button>
+  </div>
+</div>
 <div class="wrap">
   <div class="header">
     <svg class="pulseline" viewBox="0 0 500 120" preserveAspectRatio="none">
@@ -247,6 +256,7 @@
       <button class="tabbtn active" id="tabRankingBtn">🏆 Ranking de profesionales</button>
       <button class="tabbtn" id="tabNotasBtn">📝 Notas del mes</button>
       <button class="tabbtn" id="tabIncumplimientosBtn">⚠️ Incumplimientos</button>
+      <button class="tabbtn" id="tabRetroBtn">🗣️ Retroalimentaciones</button>
     </div>
 
     <div class="panel">
@@ -303,6 +313,45 @@
         </div>
         <div class="errmsg" id="notasError" style="display:none;"></div>
         <button class="btn btn-primary" id="btnGuardarGrilla" style="width:100%;justify-content:center;">Guardar notas</button>
+      </div>
+
+      <div id="tabRetroPanel" style="display:none;">
+        <div id="retroPendientesList" style="margin-bottom:22px;"></div>
+
+        <div class="mono" style="font-size:12.5px;color:var(--muted);margin-bottom:8px;font-weight:600;">Agregar retroalimentación puntual (para casos que no están en la lista de pendientes)</div>
+        <div class="addrow" style="flex-wrap:wrap;">
+          <div class="field">
+            <label>Profesional</label>
+            <select id="retroProf"></select>
+          </div>
+          <div class="field small">
+            <label>Ámbito</label>
+            <select id="retroAmbito"></select>
+          </div>
+          <div class="field small">
+            <label>Mes</label>
+            <select id="retroMes"></select>
+          </div>
+          <div class="field">
+            <label>Quién la da</label>
+            <input id="retroAutor" placeholder="Nombre de quien retroalimenta">
+          </div>
+          <div class="field small">
+            <label>Recepción</label>
+            <select id="retroReceptividad">
+              <option value="Receptivo">Receptivo</option>
+              <option value="No receptivo">No receptivo</option>
+            </select>
+          </div>
+        </div>
+        <div class="field" style="margin-top:10px;">
+          <label>Comentario</label>
+          <textarea id="retroComentario" rows="3" style="width:100%;font-family:inherit;font-size:14px;padding:8px;border-radius:7px;border:1px solid var(--line);" placeholder="Detalle de la retroalimentación..."></textarea>
+        </div>
+        <div class="errmsg" id="retroError" style="display:none;"></div>
+        <button class="btn btn-primary" id="btnAgregarRetro" style="margin-top:10px;">＋ Agregar retroalimentación</button>
+        <button class="btn btn-outline" id="btnExportRetro" style="margin-top:10px;">Descargar reporte (Excel)</button>
+        <div class="list" id="retroList" style="margin-top:16px;"></div>
       </div>
     </div>
   </section>
@@ -394,6 +443,8 @@ function scoreKeyFor(v){ return v == null ? "NA" : v === 0 ? "0" : v === 0.9 ? "
 // ---------- Estado ----------
 let entries = [];         // {id, ambito, profesional, mes, anio, valor, ts}
 let rosterChanges = {};   // {ambito: {added:[{name,dependencia}], removed:[name]}}
+let retro = [];           // {id, ambito, profesional, mes, anio, comentario, autor, receptividad, fecha, ts}
+let pendOpenProf = null;  // nombre del profesional con el formulario rápido de retroalimentación abierto
 let year = BASELINE_YEAR;
 let visible = new Set(AMBITOS_CORE);
 let showComplement = false;
@@ -427,10 +478,12 @@ function setSyncStatus(state){
 function loadLocalCache(){
   try { entries = JSON.parse(localStorage.getItem("dars-quality-entries") || "[]"); } catch(e){ entries = []; }
   try { rosterChanges = JSON.parse(localStorage.getItem("dars-roster-changes") || "{}"); } catch(e){ rosterChanges = {}; }
+  try { retro = JSON.parse(localStorage.getItem("dars-retroalimentaciones") || "[]"); } catch(e){ retro = []; }
 }
 function saveLocalCache(){
   localStorage.setItem("dars-quality-entries", JSON.stringify(entries));
   localStorage.setItem("dars-roster-changes", JSON.stringify(rosterChanges));
+  localStorage.setItem("dars-retroalimentaciones", JSON.stringify(retro));
 }
 
 async function loadState(){
@@ -441,6 +494,7 @@ async function loadState(){
     const data = await res.json();
     entries = data.entries || [];
     rosterChanges = data.rosterChanges || {};
+    retro = data.retro || [];
     saveLocalCache();
     setSyncStatus("ok");
   } catch (e) {
@@ -455,7 +509,7 @@ async function pushState(){
     const res = await fetch(`${API_BASE}/state`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Api-Key": API_KEY },
-      body: JSON.stringify({ entries, rosterChanges })
+      body: JSON.stringify({ entries, rosterChanges, retro })
     });
     if (!res.ok) throw new Error("HTTP " + res.status);
     setSyncStatus("ok");
@@ -467,6 +521,7 @@ async function pushState(){
 
 function saveEntries(){ saveLocalCache(); pushState(); }
 function saveRoster(){ saveLocalCache(); pushState(); }
+function saveRetro(){ saveLocalCache(); pushState(); }
 
 // ---------- Helpers de datos ----------
 function getRoster(ambito){
@@ -811,11 +866,14 @@ function renderAll(){
   document.getElementById("tabRankingBtn").classList.toggle("active", tab==="ranking");
   document.getElementById("tabNotasBtn").classList.toggle("active", tab==="notas");
   document.getElementById("tabIncumplimientosBtn").classList.toggle("active", tab==="incumplimientos");
+  document.getElementById("tabRetroBtn").classList.toggle("active", tab==="retro");
   document.getElementById("tabRankingPanel").style.display = tab==="ranking" ? "block" : "none";
   document.getElementById("tabNotasPanel").style.display = tab==="notas" ? "block" : "none";
   document.getElementById("tabIncumplimientosPanel").style.display = tab==="incumplimientos" ? "block" : "none";
+  document.getElementById("tabRetroPanel").style.display = tab==="retro" ? "block" : "none";
   if (tab==="ranking") renderRanking();
   else if (tab==="incumplimientos") renderIncumplimientos();
+  else if (tab==="retro") renderRetro();
   else renderNotas();
 }
 
@@ -880,6 +938,205 @@ function exportExcel(){
     XLSX.utils.book_append_sheet(wb, sheet, safeName);
   });
   XLSX.writeFile(wb, `DARS_calidad_${ctxAnio}.xlsx`);
+}
+
+// ---------- Retroalimentaciones ----------
+function computeRetroPendientes(){
+  const mes = ctxMes, anio = ctxAnio;
+  const byProf = {};
+  ALL_AMBITOS.forEach(amb => {
+    getRoster(amb).forEach(p => {
+      const v = getValue(amb, p.name, mes, anio);
+      if (v === 0){
+        const done = retro.some(r => r.profesional===p.name && r.ambito===amb && r.mes===mes && r.anio===anio);
+        if (!byProf[p.name]) byProf[p.name] = { profesional: p.name, dependencia: p.dependencia||"", items: [] };
+        byProf[p.name].items.push({ ambito: amb, done });
+      }
+    });
+  });
+  return Object.values(byProf).sort((a,b) => a.profesional.localeCompare(b.profesional));
+}
+function renderRetroPendientes(){
+  const el = document.getElementById("retroPendientesList");
+  const data = computeRetroPendientes();
+  let html = `<div class="mono" style="font-size:11.5px;color:var(--muted);margin-bottom:10px;">Profesionales con 0% en algún ámbito — ${ctxMes} ${ctxAnio} (la retroalimentación es mensual: no arrastra de otros meses)</div>`;
+  if (data.length === 0){
+    html += `<div class="empty">Nadie tiene 0% en ningún ámbito este mes. 🎉</div>`;
+  } else {
+    html += `<div class="list" style="max-height:none;">` + data.map(p => {
+      const pendientes = p.items.filter(it => !it.done);
+      const isOpen = pendOpenProf === p.profesional;
+      const pKey = encodeURIComponent(p.profesional);
+      return `
+      <div class="row" style="flex-direction:column;align-items:flex-start;gap:6px;">
+        <div style="display:flex;justify-content:space-between;width:100%;align-items:center;">
+          <div>
+            <strong>${p.profesional}</strong>
+            ${p.dependencia?`<span class="dep">${p.dependencia}</span>`:""}
+          </div>
+          ${pendientes.length>0 ? `<button class="btn btn-outline" data-pend-toggle="${pKey}" style="padding:6px 12px;font-size:12.5px;">${isOpen?"Cancelar":`Retroalimentar pendientes (${pendientes.length})`}</button>` : ""}
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;">
+          ${p.items.map(it => `<span class="pill mono" style="background:${it.done?'var(--good-bg)':'var(--warn-bg)'};color:${it.done?'var(--good)':'var(--warn)'};display:inline-flex;align-items:center;gap:5px;">
+            <span style="width:8px;height:8px;border-radius:50%;background:${it.done?'var(--good)':'var(--warn)'};display:inline-block;"></span>
+            ${it.ambito}
+          </span>`).join("")}
+        </div>
+        ${isOpen ? `
+        <div style="width:100%;background:var(--panel-2,rgba(0,0,0,.03));border-radius:8px;padding:12px;margin-top:4px;">
+          <div class="mono" style="font-size:11.5px;color:var(--muted);margin-bottom:8px;">Se va a registrar una retroalimentación para: ${pendientes.map(it=>it.ambito).join(", ")} · ${ctxMes} ${ctxAnio}</div>
+          <div class="addrow" style="flex-wrap:wrap;">
+            <div class="field">
+              <label>Quién la da</label>
+              <input id="pendAutor-${pKey}" placeholder="Nombre de quien retroalimenta">
+            </div>
+            <div class="field small">
+              <label>Recepción</label>
+              <select id="pendReceptividad-${pKey}">
+                <option value="Receptivo">Receptivo</option>
+                <option value="No receptivo">No receptivo</option>
+              </select>
+            </div>
+          </div>
+          <div class="field" style="margin-top:8px;">
+            <label>Comentario (se aplica a todos los ámbitos pendientes de arriba)</label>
+            <textarea id="pendComentario-${pKey}" rows="2" style="width:100%;font-family:inherit;font-size:14px;padding:8px;border-radius:7px;border:1px solid var(--line);" placeholder="Detalle de la retroalimentación..."></textarea>
+          </div>
+          <div class="errmsg" id="pendError-${pKey}" style="display:none;"></div>
+          <button class="btn btn-primary" data-pend-save="${pKey}" style="margin-top:8px;">Guardar retroalimentación</button>
+        </div>` : ""}
+      </div>`;
+    }).join("") + `</div>`;
+  }
+  el.innerHTML = html;
+  el.querySelectorAll("[data-pend-toggle]").forEach(b => b.onclick = () => {
+    const name = decodeURIComponent(b.dataset.pendToggle);
+    pendOpenProf = (pendOpenProf === name) ? null : name;
+    renderRetroPendientes();
+  });
+  el.querySelectorAll("[data-pend-save]").forEach(b => b.onclick = () => guardarRetroRapida(decodeURIComponent(b.dataset.pendSave)));
+}
+function guardarRetroRapida(profesional){
+  const pKey = encodeURIComponent(profesional);
+  const errEl = document.getElementById(`pendError-${pKey}`);
+  errEl.style.display = "none";
+  const comentario = document.getElementById(`pendComentario-${pKey}`).value.trim();
+  const autor = document.getElementById(`pendAutor-${pKey}`).value.trim();
+  const receptividad = document.getElementById(`pendReceptividad-${pKey}`).value;
+  if (!comentario){
+    errEl.textContent = "Escribí un comentario.";
+    errEl.style.display = "block";
+    return;
+  }
+  const data = computeRetroPendientes();
+  const p = data.find(x => x.profesional === profesional);
+  const pendientes = p ? p.items.filter(it => !it.done) : [];
+  const fecha = new Date().toISOString().slice(0,10);
+  pendientes.forEach((it, i) => {
+    retro.push({
+      id: Date.now() + "-" + i + "-" + Math.random().toString(36).slice(2,7),
+      ambito: it.ambito, profesional, mes: ctxMes, anio: ctxAnio,
+      comentario, autor: autor || "—", receptividad,
+      fecha, ts: Date.now() + i
+    });
+  });
+  pendOpenProf = null;
+  saveRetro();
+  renderRetro();
+}
+function poblarSelectRetroProf(ambito){
+  const sel = document.getElementById("retroProf");
+  const roster = getRoster(ambito);
+  sel.innerHTML = roster.map(p => `<option value="${encodeURIComponent(p.name)}">${p.name}</option>`).join("");
+}
+function renderRetro(){
+  renderRetroPendientes();
+  const ambSel = document.getElementById("retroAmbito");
+  if (ambSel.options.length === 0){
+    ambSel.innerHTML = ALL_AMBITOS.map(a => `<option value="${a}">${a}</option>`).join("");
+    ambSel.value = ctxAmbito;
+    poblarSelectRetroProf(ambSel.value);
+  }
+  const mesSel = document.getElementById("retroMes");
+  if (mesSel.options.length === 0){
+    mesSel.innerHTML = MONTHS.map(m => `<option value="${m}">${m}</option>`).join("");
+    mesSel.value = ctxMes;
+  }
+  const el = document.getElementById("retroList");
+  const sorted = [...retro].sort((a,b) => b.ts - a.ts);
+  if (sorted.length === 0){
+    el.innerHTML = `<div class="empty">Todavía no se registraron retroalimentaciones.</div>`;
+    return;
+  }
+  el.innerHTML = sorted.map(r => `
+    <div class="row" style="flex-direction:column;align-items:flex-start;gap:4px;">
+      <div style="display:flex;justify-content:space-between;width:100%;gap:10px;align-items:center;">
+        <strong>${r.profesional}</strong>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="mono" style="font-size:11.5px;color:var(--muted);white-space:nowrap;">${r.fecha}</span>
+          <button class="btn-ghost" data-del-retro="${r.id}" title="Eliminar esta retroalimentación (para volver a cargarla si tuvo un error)">✕</button>
+        </div>
+      </div>
+      <div class="mono" style="font-size:11.5px;color:var(--muted);">${r.ambito} · ${r.mes} ${r.anio} · por ${r.autor||"—"}${r.receptividad?` · <span style="color:${r.receptividad==='Receptivo'?'var(--good)':'var(--bad)'};font-weight:600;">${r.receptividad}</span>`:""}</div>
+      <div style="font-size:13.5px;">${r.comentario}</div>
+      <div style="display:flex;align-items:center;gap:6px;margin-top:2px;">
+        <label class="mono" style="font-size:11px;color:var(--muted);">Correo:</label>
+        <select data-correo-estado="${r.id}" style="font-size:12px;padding:3px 6px;border-radius:6px;border:1px solid var(--line);background:${r.correoEstado==='Enviado'?'var(--good-bg)':'var(--warn-bg)'};color:${r.correoEstado==='Enviado'?'var(--good)':'var(--warn)'};font-weight:600;">
+          <option value="Pendiente" ${r.correoEstado!=='Enviado'?'selected':''}>Pendiente</option>
+          <option value="Enviado" ${r.correoEstado==='Enviado'?'selected':''}>Enviado</option>
+        </select>
+      </div>
+    </div>`).join("");
+  el.querySelectorAll("[data-del-retro]").forEach(b => b.onclick = () => eliminarRetro(b.dataset.delRetro));
+  el.querySelectorAll("[data-correo-estado]").forEach(s => s.onchange = (e) => actualizarCorreoEstado(s.dataset.correoEstado, e.target.value));
+}
+function actualizarCorreoEstado(id, estado){
+  const r = retro.find(x => x.id === id);
+  if (!r) return;
+  r.correoEstado = estado;
+  saveRetro();
+  renderRetro();
+}
+function eliminarRetro(id){
+  if (!confirm("¿Eliminar esta retroalimentación? Vas a poder volver a cargarla con los datos correctos.")) return;
+  retro = retro.filter(r => r.id !== id);
+  saveRetro();
+  renderRetro();
+}
+function agregarRetro(){
+  const errEl = document.getElementById("retroError");
+  errEl.style.display = "none";
+  const profSel = document.getElementById("retroProf");
+  const profesional = profSel.options.length ? decodeURIComponent(profSel.value) : "";
+  const ambito = document.getElementById("retroAmbito").value;
+  const mes = document.getElementById("retroMes").value;
+  const autor = document.getElementById("retroAutor").value.trim();
+  const receptividad = document.getElementById("retroReceptividad").value;
+  const comentario = document.getElementById("retroComentario").value.trim();
+  if (!profesional || !comentario){
+    errEl.textContent = "Elegí un profesional y escribí un comentario.";
+    errEl.style.display = "block";
+    return;
+  }
+  retro.push({
+    id: Date.now() + "-" + Math.random().toString(36).slice(2,7),
+    ambito, profesional, mes, anio: ctxAnio,
+    comentario, autor: autor || "—", receptividad,
+    fecha: new Date().toISOString().slice(0,10),
+    ts: Date.now()
+  });
+  document.getElementById("retroComentario").value = "";
+  document.getElementById("retroAutor").value = "";
+  saveRetro();
+  renderRetro();
+}
+function exportRetroExcel(){
+  const header = ["Profesional","Ámbito","Mes","Año","Comentario","Quién la dio","Recepción","Correo","Fecha"];
+  const rows = [...retro].sort((a,b) => a.ts - b.ts).map(r => [r.profesional, r.ambito, r.mes, r.anio, r.comentario, r.autor||"", r.receptividad||"", r.correoEstado||"Pendiente", r.fecha]);
+  const sheet = XLSX.utils.aoa_to_sheet([header, ...rows]);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, sheet, "Retroalimentaciones");
+  XLSX.writeFile(wb, `DARS_retroalimentaciones_${ctxAnio}.xlsx`);
 }
 
 // ---------- Importar desde Excel ----------
@@ -960,7 +1217,7 @@ function confirmImport(){
 }
 
 // ---------- Eventos ----------
-document.addEventListener("DOMContentLoaded", async () => {
+async function initApp(){
   await loadState();
   ctxAnio = year;
   initGridDraft();
@@ -1007,6 +1264,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("tabRankingBtn").onclick = () => { tab = "ranking"; renderAll(); };
   document.getElementById("tabNotasBtn").onclick = () => { tab = "notas"; initGridDraft(); renderAll(); };
   document.getElementById("tabIncumplimientosBtn").onclick = () => { tab = "incumplimientos"; renderAll(); };
+  document.getElementById("tabRetroBtn").onclick = () => { tab = "retro"; renderAll(); };
   document.getElementById("umbralSel").onchange = (e) => { umbral = parseFloat(e.target.value); renderIncumplimientos(); };
   document.getElementById("ctxAmbito").onchange = (e) => { ctxAmbito = e.target.value; initGridDraft(); renderAll(); };
   document.getElementById("ctxMes").onchange = (e) => { ctxMes = e.target.value; initGridDraft(); renderAll(); };
@@ -1019,6 +1277,43 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("fileImport").onchange = (e) => { if (e.target.files[0]) handleImportFile(e.target.files[0]); e.target.value=""; };
   document.getElementById("btnCancelImport").onclick = () => { pendingImport=null; document.getElementById("importModalBg").classList.remove("open"); };
   document.getElementById("btnConfirmImport").onclick = confirmImport;
+  document.getElementById("btnAgregarRetro").onclick = agregarRetro;
+  document.getElementById("btnExportRetro").onclick = exportRetroExcel;
+  document.getElementById("retroAmbito").onchange = (e) => { poblarSelectRetroProf(e.target.value); };
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const overlay = document.getElementById("gateOverlay");
+  const pwInput = document.getElementById("gatePassword");
+  const errEl = document.getElementById("gateError");
+
+  function unlock(){
+    try { localStorage.setItem("dars-calidad-unlocked", "1"); } catch(e){}
+    overlay.style.display = "none";
+    initApp();
+  }
+  function tryUnlock(){
+    if (pwInput.value === API_KEY){
+      errEl.style.display = "none";
+      unlock();
+    } else {
+      errEl.style.display = "block";
+      pwInput.value = "";
+      pwInput.focus();
+    }
+  }
+
+  let alreadyUnlocked = false;
+  try { alreadyUnlocked = localStorage.getItem("dars-calidad-unlocked") === "1"; } catch(e){}
+
+  if (alreadyUnlocked){
+    overlay.style.display = "none";
+    initApp();
+  } else {
+    document.getElementById("gateSubmit").onclick = tryUnlock;
+    pwInput.onkeydown = (e) => { if (e.key === "Enter") tryUnlock(); };
+    pwInput.focus();
+  }
 });
 </script>
 </body></html>
