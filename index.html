@@ -184,6 +184,7 @@
   .list{max-height:480px;overflow-y:auto;}
   .row{display:flex;align-items:center;gap:12px;padding:10px 8px;border-bottom:1px solid var(--line2);animation:fadeUp .35s ease both;transition:background-color .15s ease;}
   .row:hover{background:#F5F8FC;}
+  .rank-tr:hover{background:#F5F8FC;}
   .rank-n{width:28px;text-align:right;font-weight:700;font-size:13px;}
   .name{font-size:14px;font-weight:500;}
   .dep{font-size:11px;color:var(--faint);}
@@ -284,6 +285,10 @@
         <div class="field" id="mesSingleField" style="display: none;">
           <label>Mes</label>
           <select id="ctxMes"></select>
+        </div>
+        <div class="field" id="ambitoMultiField" style="flex: 1 1 100%; min-width: 240px; display: none;">
+          <label>Ámbitos (puedes elegir varios)</label>
+          <div class="chips" id="rankingAmbitosChips" style="margin:0;"></div>
         </div>
         <div class="field" id="mesMultiField" style="flex: 1 1 0%; min-width: 240px; display: none;">
           <label>Meses (puedes elegir varios)</label>
@@ -455,6 +460,7 @@ let tab = "ranking";
 let ctxAmbito = AMBITOS_CORE[0];
 let ctxMes = MONTHS[0];
 let rankingMonths = new Set([MONTHS[0]]); // selección múltiple de meses, solo para el ranking
+let rankingAmbitos = new Set([AMBITOS_CORE[0]]); // selección múltiple de ámbitos, solo para el ranking
 let ctxAnio = BASELINE_YEAR;
 let search = "";
 let gridDraft = {};
@@ -597,23 +603,36 @@ function computeSummary(chartData){
   });
 }
 function computeRanking(){
-  const roster = filterByDep(getRoster(ctxAmbito));
-  const q = search.trim().toLowerCase();
+  const ambitos = ALL_AMBITOS.filter(a => rankingAmbitos.has(a));
   const meses = rankingMonths.size ? Array.from(rankingMonths) : [ctxMes];
-  const list = roster
+  const q = search.trim().toLowerCase();
+  const avg = arr => arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : null;
+  // Nómina combinada de los ámbitos elegidos (sin duplicados)
+  const rosterMap = new Map();
+  ambitos.forEach(amb => filterByDep(getRoster(amb)).forEach(p => {
+    if (!rosterMap.has(p.name)) rosterMap.set(p.name, { ...p, ambitos: new Set() });
+    rosterMap.get(p.name).ambitos.add(amb);
+  }));
+  const list = Array.from(rosterMap.values())
     .filter(p => !q || p.name.toLowerCase().includes(q))
     .map(p => {
-      const vals = meses.map(m => getValue(ctxAmbito, p.name, m, ctxAnio)).filter(v => v != null);
-      const valor = vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
-      return { ...p, valor };
+      // Sin nota en un ámbito o mes => no cuenta para el promedio (se muestra "—")
+      const porAmbito = {};
+      ambitos.forEach(amb => {
+        porAmbito[amb] = p.ambitos.has(amb)
+          ? avg(meses.map(m => getValue(amb, p.name, m, ctxAnio)).filter(v => v != null))
+          : null;
+      });
+      const valor = avg(Object.values(porAmbito).filter(v => v != null));
+      return { ...p, porAmbito, valor };
     });
   list.sort((a,b) => {
     if (a.valor==null && b.valor==null) return a.name.localeCompare(b.name);
     if (a.valor==null) return 1;
     if (b.valor==null) return -1;
-    return b.valor - a.valor;
+    return b.valor - a.valor || a.name.localeCompare(b.name);
   });
-  return list;
+  return { list, ambitos, meses };
 }
 
 // ---------- Render ----------
@@ -931,24 +950,33 @@ function renderEvolucion(){
 }
 
 function renderRanking(){
-  const list = computeRanking();
-  const mesesLabel = rankingMonths.size > 1
-    ? `Promedio de ${Array.from(rankingMonths).sort((a,b)=>MONTHS.indexOf(a)-MONTHS.indexOf(b)).join(", ")}`
-    : `Mes: ${Array.from(rankingMonths)[0] || ctxMes}`;
+  const { list, ambitos, meses } = computeRanking();
+  const mesesOrden = meses.slice().sort((a,b)=>MONTHS.indexOf(a)-MONTHS.indexOf(b));
+  const mesesLabel = mesesOrden.length > 1 ? `Promedio de ${mesesOrden.join(", ")}` : `Mes: ${mesesOrden[0]}`;
   const el = document.getElementById("rankingList");
-  let html = `<div class="mono" style="font-size:11.5px;color:var(--muted);margin-bottom:8px;">${mesesLabel}</div>`;
-  if (list.length===0){ html += `<div class="empty">No hay profesionales en la nómina de este ámbito.</div>`; el.innerHTML = html; return; }
-  html += list.map((p,i) => {
-    const st = statusOf(p.valor);
-    return `<div class="row" style="animation-delay:${Math.min(i*18,400)}ms;">
-      <span class="rank-n mono" style="color:${p.valor!=null?'var(--ink)':'var(--line)'}">${p.valor!=null ? i+1 : "—"}</span>
-      <div style="flex:1;min-width:0;">
-        <div class="name">${escapeHtml(p.name)}</div>
-        ${p.dependencia?`<div class="dep">${escapeHtml(p.dependencia)}</div>`:""}
-      </div>
-      <span class="pill mono" style="background:${st.bg};color:${st.color};min-width:56px;text-align:center;">${pct(p.valor)}</span>
-    </div>`;
-  }).join("");
+  let html = `<div class="mono" style="font-size:11.5px;color:var(--muted);margin-bottom:8px;">${mesesLabel} · ${ctxAnio} · Total = promedio de los ámbitos con nota</div>`;
+  if (list.length===0){ html += `<div class="empty">No hay profesionales en la nómina de los ámbitos elegidos.</div>`; el.innerHTML = html; return; }
+  const celda = v => {
+    if (v == null) return `<span class="mono" style="color:var(--faint)">—</span>`;
+    const st = statusOf(v);
+    return `<span class="pill mono" style="background:${st.bg};color:${st.color};display:inline-block;min-width:48px;text-align:center;">${pct(v)}</span>`;
+  };
+  const th = "padding:8px 6px;font-size:11px;font-weight:600;color:var(--muted);border-bottom:1px solid var(--line);white-space:nowrap;";
+  const td = "padding:7px 6px;border-bottom:1px solid var(--line2);";
+  html += `<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;">
+    <thead><tr>
+      <th style="${th}text-align:right;width:32px;">#</th>
+      <th style="${th}text-align:left;">Profesional</th>
+      ${ambitos.map(a=>`<th style="${th}text-align:center;">${escapeHtml(a)}</th>`).join("")}
+      <th style="${th}text-align:center;color:var(--ink);">Total</th>
+    </tr></thead><tbody>
+    ${list.map((p,i) => `<tr class="rank-tr">
+      <td style="${td}text-align:right;" class="rank-n mono"><span style="color:${p.valor!=null?'var(--ink)':'var(--line)'}">${p.valor!=null ? i+1 : "—"}</span></td>
+      <td style="${td}"><div class="name">${escapeHtml(p.name)}</div>${p.dependencia?`<div class="dep">${escapeHtml(p.dependencia)}</div>`:""}</td>
+      ${ambitos.map(a=>`<td style="${td}text-align:center;">${celda(p.porAmbito[a])}</td>`).join("")}
+      <td style="${td}text-align:center;font-weight:700;">${celda(p.valor)}</td>
+    </tr>`).join("")}
+    </tbody></table></div>`;
   el.innerHTML = html;
 }
 function renderIncumplimientos(){
@@ -1066,7 +1094,8 @@ function renderCtxSelectors(){
   document.getElementById("ctxAnio").value = ctxAnio;
   document.getElementById("searchField").style.display = (tab==="ranking"||tab==="incumplimientos") ? "block" : "none";
 
-  document.getElementById("ambitoField").style.display = (tab==="incumplimientos"||tab==="evolucion") ? "none" : "block";
+  document.getElementById("ambitoField").style.display = (tab==="incumplimientos"||tab==="evolucion"||tab==="ranking") ? "none" : "block";
+  document.getElementById("ambitoMultiField").style.display = tab==="ranking" ? "block" : "none";
   document.getElementById("mesSingleField").style.display = tab==="notas" ? "block" : "none";
   document.getElementById("mesMultiField").style.display = tab==="ranking" ? "block" : "none";
 
@@ -1147,6 +1176,27 @@ function renderCtxSelectors(){
   }
 
   if (tab==="ranking"){
+    const ambChipsEl = document.getElementById("rankingAmbitosChips");
+    const todos = rankingAmbitos.size === ALL_AMBITOS.length;
+    ambChipsEl.innerHTML =
+      `<span class="chip" data-amb-all="1" style="font-size:11.5px;padding:5px 10px;border-color:var(--ink);background:${todos?'var(--ink)':'transparent'};color:${todos?'#fff':'var(--ink)'}">Todos</span>` +
+      ALL_AMBITOS.map(amb => {
+        const on = rankingAmbitos.has(amb);
+        const c = LINE_COLORS[amb];
+        return `<span class="chip" data-amb="${amb}" style="font-size:11.5px;padding:5px 10px;border-color:${c};background:${on?c:'transparent'};color:${on?'#fff':c}">${amb}</span>`;
+      }).join("");
+    ambChipsEl.querySelectorAll(".chip[data-amb]").forEach(c => c.onclick = () => {
+      const amb = c.dataset.amb;
+      if (rankingAmbitos.has(amb)){ if (rankingAmbitos.size>1) rankingAmbitos.delete(amb); }
+      else rankingAmbitos.add(amb);
+      renderRanking();
+      renderCtxSelectors();
+    });
+    ambChipsEl.querySelector(".chip[data-amb-all]").onclick = () => {
+      rankingAmbitos = todos ? new Set([AMBITOS_CORE[0]]) : new Set(ALL_AMBITOS);
+      renderRanking();
+      renderCtxSelectors();
+    };
     const chipsEl = document.getElementById("rankingMonthsChips");
     chipsEl.innerHTML = MONTHS.map(m => {
       const on = rankingMonths.has(m);
