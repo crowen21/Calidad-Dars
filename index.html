@@ -1006,6 +1006,14 @@ function descargarRankingPdf(list, ambitos, mesesOrden, sinNota){
   const incompletos = list.filter(p=>p.incompleto).length;
   const CORTO = {"Agendamiento":"Agend.","Protocolo de atención":"Protocolo","Entrega de la información":"Entrega info.","Tipificación":"Tipif.","CPO (Cuidados Post Operatorios)":"CPO","Lista de espera No GES":"LE No GES"};
   const compacto = ambitos.length > 5;
+  // Hasta 45 profesionales se arma en una sola hoja (formato compacto); con más, pasa a varias hojas legibles
+  const unaHoja = list.length <= 45;
+  const cssUnaHoja = unaHoja ? `
+  body{font-size:8.5px} header{padding-bottom:4px;margin-bottom:6px} h1{font-size:15px}
+  .kpis{margin-bottom:5px} .kpi{padding:4px 8px} .kpi .v{font-size:14px} .kpi .l{font-size:7px}
+  .ambs{margin-bottom:4px} th{padding:3px 2px} td{padding:0.5px 2px;line-height:1.15} td.n{font-size:8px}
+  .dep,.inc{display:inline;margin-left:5px;font-size:7.5px} .pill{padding:0 3px;font-size:8px;min-width:28px}
+  footer{margin-top:4px;font-size:7.5px}` : "";
   const hoy = new Date().toLocaleString("es-CL", { dateStyle:"long", timeStyle:"short" });
   const periodo = mesesOrden.length > 1 ? `${mesesOrden.join(", ")} ${ctxAnio} (promedio)` : `${mesesOrden[0]} ${ctxAnio}`;
   const dep = depFilter === "Todas" ? "Todas las dependencias" : `Dependencia: ${depFilter}`;
@@ -1044,7 +1052,7 @@ function descargarRankingPdf(list, ambitos, mesesOrden, sinNota){
   .inc { color:#A86A00; font-weight:600; }
   .pill { display:inline-block; min-width:${compacto?32:40}px; padding:2px ${compacto?3:6}px; border-radius:10px; font-weight:700; font-size:${compacto?9.5:10.5}px; }
   .na { color:#B0BAC5; }
-  footer { margin-top:10px; color:#7B8794; font-size:9px; line-height:1.5; }
+  footer { margin-top:10px; color:#7B8794; font-size:9px; line-height:1.5; }${cssUnaHoja}
 </style></head><body>
 <header>
   <div><h1>Ranking de profesionales</h1><div class="sub">Aseguramiento de la Calidad · DARS · Salud Responde</div></div>
