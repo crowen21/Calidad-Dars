@@ -992,14 +992,16 @@ function renderRanking(){
 // ---------- Ranking en PDF (dashboard imprimible) ----------
 function descargarRankingPdf(list, ambitos, mesesOrden, sinNota){
   const esc = escapeHtml;
-  const COLORES = { "Cumple": ["#1F7A4D","#E3F3EA"], "Alerta": ["#A86A00","#FFF3D6"], "Crítico": ["#B42318","#FDE8E7"] };
+  // Categorías para promedios: 90–100% Excelente, 85–89% Cumple, bajo 85% No cumple.
+  const COLORES = { "Excelente": ["#0B5A36","#CDEBDB"], "Cumple": ["#1F7A4D","#E8F5EE"], "No cumple": ["#B42318","#FDE8E7"] };
+  const categoria = v => { const r = Math.round(v*100); return r >= 90 ? "Excelente" : r >= 85 ? "Cumple" : "No cumple"; };
   const celda = v => {
     if (v == null) return `<span class="na">—</span>`;
-    const [c,bg] = COLORES[statusOf(v).label];
+    const [c,bg] = COLORES[categoria(v)];
     return `<span class="pill" style="color:${c};background:${bg}">${pct(v)}</span>`;
   };
-  const conteo = { "Cumple":0, "Alerta":0, "Crítico":0 };
-  list.forEach(p => conteo[statusOf(p.valor).label]++);
+  const conteo = { "Excelente":0, "Cumple":0, "No cumple":0 };
+  list.forEach(p => conteo[categoria(p.valor)]++);
   const promedio = list.reduce((a,p)=>a+p.valor,0) / list.length;
   const incompletos = list.filter(p=>p.incompleto).length;
   const CORTO = {"Agendamiento":"Agend.","Protocolo de atención":"Protocolo","Entrega de la información":"Entrega info.","Tipificación":"Tipif.","CPO (Cuidados Post Operatorios)":"CPO","Lista de espera No GES":"LE No GES"};
@@ -1051,16 +1053,16 @@ function descargarRankingPdf(list, ambitos, mesesOrden, sinNota){
 <div class="kpis">
   <div class="kpi"><div class="v">${list.length}</div><div class="l">Profesionales con nota</div></div>
   <div class="kpi"><div class="v">${pct(promedio)}</div><div class="l">Promedio general</div></div>
-  <div class="kpi"><div class="v" style="color:#1F7A4D">${conteo["Cumple"]}</div><div class="l">Cumple (≥ 90%)</div></div>
-  <div class="kpi"><div class="v" style="color:#A86A00">${conteo["Alerta"]}</div><div class="l">Alerta (80–89%)</div></div>
-  <div class="kpi"><div class="v" style="color:#B42318">${conteo["Crítico"]}</div><div class="l">Crítico (&lt; 80%)</div></div>
+  <div class="kpi"><div class="v" style="color:#0B5A36">${conteo["Excelente"]}</div><div class="l">Excelente (90–100%)</div></div>
+  <div class="kpi"><div class="v" style="color:#1F7A4D">${conteo["Cumple"]}</div><div class="l">Cumple (85–89%)</div></div>
+  <div class="kpi"><div class="v" style="color:#B42318">${conteo["No cumple"]}</div><div class="l">No cumple (&lt; 85%)</div></div>
 </div>
 <div class="ambs"><b>Ámbitos incluidos (${ambitos.length}):</b> ${ambitos.map(esc).join(" · ")}</div>
 <table><thead><tr><th>#</th><th class="l">Profesional</th>${ambitos.map(a=>`<th title="${esc(a)}">${esc(compacto?(CORTO[a]||a):a)}</th>`).join("")}<th>Total</th></tr></thead>
 <tbody>${filas}</tbody></table>
 <footer>
-  Cada columna de ámbito es el promedio de los meses del período; el Total es el promedio de los ámbitos con nota. “—” = sin evaluación (no cuenta para el promedio).
-  ${incompletos ? `Los ${incompletos} profesionales marcados con “x de n meses” no tienen notas en todo el período y se ubican después de quienes sí las tienen (antes de los críticos).` : ""}
+  Categorías: 90–100% Excelente, 85–89% Cumple, bajo 85% No cumple. Cada columna de ámbito es el promedio de los meses del período; el Total es el promedio de los ámbitos con nota. “—” = sin evaluación (no cuenta para el promedio).
+  ${incompletos ? `Los ${incompletos} profesionales marcados con “x de n meses” no tienen notas en todo el período y se ubican después de quienes sí las tienen (antes de los que están en rojo).` : ""}
   ${sinNota ? `${sinNota} profesionales de la nómina no tienen notas en el período y no se incluyen.` : ""}
 </footer>
 </body></html>`;
