@@ -54,10 +54,21 @@ Desde el EC2, parado en `/var/www/dars-calidad`:
 
 ## Diseño de los datos
 
-El frontend mantiene `entries` (notas cargadas) y `rosterChanges` (altas/bajas de
-profesionales) en memoria, igual que antes con localStorage. Ahora, además de
-guardarlos localmente como caché, los reenvía completos al backend en cada cambio
-(`POST /api/calidad-agentes/state`), que sobrescribe el estado guardado en SQLite.
-Se eligió sobrescribir todo en vez de un modelo de eventos por simplicidad; si el
-equipo crece mucho y empiezan a pisarse guardados simultáneos, ahí conviene migrar
-a un modelo append-only.
+El frontend mantiene `entries` (notas cargadas), `rosterChanges` (altas/bajas de
+profesionales) y `retroStatus` (seguimiento de retroalimentaciones por profesional)
+en memoria. Además de guardarlos localmente como caché (localStorage), los reenvía
+completos al backend en cada cambio (`POST /api/calidad-agentes/state`), que
+sobrescribe el estado guardado en SQLite. Se eligió sobrescribir todo en vez de un
+modelo de eventos por simplicidad; si el equipo crece mucho y empiezan a pisarse
+guardados simultáneos, ahí conviene migrar a un modelo append-only.
+
+El botón "💾 Guardar cambios en el archivo" es un respaldo manual aparte: descarga
+una copia del HTML con el estado actual incrustado adentro (no reemplaza la
+sincronización con el backend, que es la fuente de verdad compartida).
+
+## Antes de publicar desde este repo
+
+Este repositorio es público, así que `index.html` se guarda **sin datos** (los bloques
+`@DATA` van vacíos) y con `API_KEY = "CAMBIA_ESTA_CLAVE"`. Los datos reales viven en el
+backend (SQLite del EC2). Antes de copiar `index.html` al servidor, reemplazá esa
+constante por la clave real (la misma que `CALIDAD_AGENTES_API_KEY` del servicio).

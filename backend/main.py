@@ -7,7 +7,7 @@ que ya corra en el mismo servidor. No comparte tablas ni rutas con otros
 proyectos.
 
 Endpoints:
-  GET  /api/calidad-agentes/state   -> {entries: [...], rosterChanges: {...}}
+  GET  /api/calidad-agentes/state   -> {entries: [...], rosterChanges: {...}, retroStatus: {...}}
       Lectura libre (el dashboard necesita cargar sin pedir clave).
   POST /api/calidad-agentes/state   -> requiere header X-Api-Key
       Sobrescribe el estado completo con lo que envía el cliente.
@@ -64,9 +64,13 @@ def init_db():
                 updated_at TEXT
             )
         """)
+        # Migración para bases creadas antes de que existiera retro_json.
+        cols = [row[1] for row in conn.execute("PRAGMA table_info(state_blob)").fetchall()]
+        if "retro_json" not in cols:
+            conn.execute("ALTER TABLE state_blob ADD COLUMN retro_json TEXT NOT NULL DEFAULT '{}'")
         conn.execute("""
-            INSERT OR IGNORE INTO state_blob (id, entries_json, roster_json)
-            VALUES (1, '[]', '{}')
+            INSERT OR IGNORE INTO state_blob (id, entries_json, roster_json, retro_json)
+            VALUES (1, '[]', '{}', '{}')
         """)
         conn.commit()
 
@@ -79,20 +83,22 @@ def on_startup():
 class StatePayload(BaseModel):
     entries: List[Dict[str, Any]] = []
     rosterChanges: Dict[str, Any] = {}
+    retroStatus: Dict[str, Any] = {}
 
 
 @app.get("/api/calidad-agentes/state")
 def get_state():
     with get_db() as conn:
         row = conn.execute(
-            "SELECT entries_json, roster_json FROM state_blob WHERE id = 1"
+            "SELECT entries_json, roster_json, retro_json FROM state_blob WHERE id = 1"
         ).fetchone()
     if not row:
-        return {"entries": [], "rosterChanges": {}}
-    entries_json, roster_json = row
+        return {"entries": [], "rosterChanges": {}, "retroStatus": {}}
+    entries_json, roster_json, retro_json = row
     return {
         "entries": json.loads(entries_json),
         "rosterChanges": json.loads(roster_json),
+        "retroStatus": json.loads(retro_json),
     }
 
 
@@ -104,10 +110,10 @@ def save_state(payload: StatePayload, x_api_key: Optional[str] = Header(default=
         conn.execute(
             """
             UPDATE state_blob
-            SET entries_json = ?, roster_json = ?, updated_at = datetime('now')
+            SET entries_json = ?, roster_json = ?, retro_json = ?, updated_at = datetime('now')
             WHERE id = 1
             """,
-            (json.dumps(payload.entries), json.dumps(payload.rosterChanges)),
+            (json.dumps(payload.entries), json.dumps(payload.rosterChanges), json.dumps(payload.retroStatus)),
         )
         conn.commit()
     return {"ok": True}
