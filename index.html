@@ -596,10 +596,12 @@ function computeChartData(){
 function computeSummary(chartData){
   return AMBITOS_CORE.map(amb => {
     const pts = chartData.map((r,i)=>({v:r[amb], mes:r.mes, i})).filter(p=>p.v!=null);
-    if (pts.length===0) return { amb, current:null, prev:null, mes:null };
+    if (pts.length===0) return { amb, current:null, prev:null, mes:null, anual:null, nMeses:0 };
     const current = pts[pts.length-1];
     const prev = pts.length>1 ? pts[pts.length-2] : null;
-    return { amb, current: current.v, prev: prev?prev.v:null, mes: current.mes };
+    // Promedio del año a la fecha = promedio de los promedios mensuales con datos
+    const anual = pts.reduce((a,p)=>a+p.v,0) / pts.length;
+    return { amb, current: current.v, prev: prev?prev.v:null, mes: current.mes, anual, nMeses: pts.length };
   });
 }
 function computeRanking(){
@@ -674,15 +676,24 @@ function renderYearSel(){
 function renderCards(chartData){
   const summary = computeSummary(chartData);
   const el = document.getElementById("cards");
-  el.innerHTML = summary.map(({amb,current,prev,mes},i) => {
-    const st = statusOf(current);
+  // Categorías de la tarjeta: 90–100% Excelente, 85–89% Cumple, bajo 85% No cumple
+  const catCard = v => {
+    if (v == null) return { label: "Sin dato", color: "var(--faint)", bg: "var(--na-bg)" };
+    const r = Math.round(v*100);
+    if (r >= 90) return { label: "Excelente", color: "var(--good)", bg: "var(--good-bg)" };
+    if (r >= 85) return { label: "Cumple", color: "#3E8E5E", bg: "var(--good-bg)" };
+    return { label: "No cumple", color: "var(--bad)", bg: "var(--bad-bg)" };
+  };
+  el.innerHTML = summary.map(({amb,current,prev,mes,anual,nMeses},i) => {
+    const st = catCard(anual);
     const delta = (current!=null && prev!=null) ? current-prev : null;
     const deltaHtml = (delta!=null && Math.abs(delta)>0.001)
       ? `<div class="delta" style="color:${delta>0?'var(--good)':'var(--bad)'}">${delta>0?'▲':'▼'} ${Math.abs(Math.round(delta*100))}pp</div>` : "";
     return `<div class="card" style="animation-delay:${i*60}ms;">
       <div class="label">${amb}</div>
-      <div class="value-row"><div class="value mono count-up" data-target="${current==null?'':Math.round(current*100)}" style="color:${st.color}">${current==null?'—':'0%'}</div>${deltaHtml}</div>
-      <div class="foot"><span class="pill" style="background:${st.bg};color:${st.color}">${st.label}</span><span class="mono" style="font-size:11px;color:var(--faint)">${mes||"sin datos"}</span></div>
+      <div class="mono" style="font-size:10.5px;color:var(--faint);margin-top:2px;">Promedio anual${nMeses?` · ${nMeses} ${nMeses===1?"mes":"meses"}`:""}</div>
+      <div class="value-row"><div class="value mono count-up" data-target="${anual==null?'':Math.round(anual*100)}" style="color:${st.color}">${anual==null?'—':'0%'}</div></div>
+      <div class="foot"><span class="pill" style="background:${st.bg};color:${st.color}">${st.label}</span><span class="mono" style="font-size:11px;color:var(--muted);display:flex;align-items:center;gap:6px;">${mes ? `${mes}: <b style="color:${catCard(current).color}">${pct(current)}</b>` : "sin datos"}${deltaHtml}</span></div>
     </div>`;
   }).join("");
 
